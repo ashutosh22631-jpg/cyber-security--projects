@@ -1,67 +1,47 @@
 import socket
-import sys
-from datetime import datetime
-import threading
+from concurrent.futures import ThreadPoolExecutor
 
-# 1. Define the target host (Use a safe, legal target for testing)
-# "scanme.nmap.org" is a service provided by Nmap for legal scanner testing.
-TARGET_HOST = "scanme.nmap.org"
+# Define connection parameters
+TARGET_HOST = "127.0.0.1"   # Target local machine safely
+START_PORT = 1
+END_PORT = 1024             # Scans standard, well-known ports
+TIMEOUT = 1.0               # Time in seconds to wait for response
+MAX_WORKERS = 100           # Number of simultaneous threads
 
-# 2. Define the common ports we want to audit
-PORTS_TO_SCAN = [21, 22, 23, 25, 53, 80, 110, 135, 139, 443, 445, 1433, 3306, 3389, 8080]
-
-def scan_port(host, port):
-    try:
-        # Create a socket object
-        # AF_INET specifies IPv4, SOCK_STREAM specifies TCP
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        
-        # Set a timeout so the script doesn't hang indefinitely on closed ports
-        s.settimeout(1.5)
-        
-        # Attempt to connect to the target IP and port
-        result = s.connect_ex((host, port))
-        
-        # connect_ex returns 0 if the connection was successful (port is open)
+def scan_single_port(host, port):
+    """
+    Attempts to establish a TCP connection to a specific port.
+    Returns the port number if open, otherwise None.
+    """
+    # AF_INET specifies IPv4, SOCK_STREAM specifies TCP
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(TIMEOUT)
+        # connect_ex returns 0 if the connection succeeded
+        result = sock.connect_ex((host, port))
         if result == 0:
-            print(f"[+] Port {port:<5} is OPEN")
-        
-        # Close the socket connection
-        s.close()
-        
-    except socket.error:
-        pass
+            return port
+    return None
 
-def run_port_scanner():
-    try:
-        # Resolve target hostname to an IPv4 address
-        target_ip = socket.gethostbyname(TARGET_HOST)
-    except socket.gaierror:
-        print(f"[!] Error: Could not resolve hostname '{TARGET_HOST}'")
-        sys.exit()
-
-    print("-" * 60)
-    print(f"[*] Initializing Security Port Scan")
-    print(f"[*] Target Host : {TARGET_HOST} ({target_ip})")
-    print(f"[*] Scan Started: {str(datetime.now())}")
-    print("-" * 60)
-
-    threads = []
+def main():
+    print(f"[*] Starting multithreaded scan on {TARGET_HOST}...")
+    print(f"[*] Scanning ports {START_PORT} through {END_PORT}...\n")
     
-    # Spawn a unique thread for each port to optimize speed
-    for port in PORTS_TO_SCAN:
-        t = threading.Thread(target=scan_port, args=(target_ip, port))
-        threads.append(t)
-        t.start()
+    open_ports = []
+    port_range = range(START_PORT, END_PORT + 1)
+    
+    # Use a ThreadPoolExecutor to run tasks in parallel
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        # Map the scan function across all target ports
+        futures = [executor.submit(scan_single_port, TARGET_HOST, port) for port in port_range]
         
-    # Wait for all background threads to complete before exiting
-    for t in threads:
-        t.join()
-
-    print("-" * 60)
-    print("[*] Port scan operation completed successfully.")
-    print("-" * 60)
+        for future in futures:
+            port_result = future.result()
+            if port_result is not None:
+                print(f"[+] Port {port_result} is OPEN")
+                open_ports.append(port_result)
+                
+    print("\n[*] Scan completed.")
+    print(f"[*] Found {len(open_ports)} open port(s).")
 
 if __name__ == "__main__":
-    run_port_scanner()
-    
+    main()
